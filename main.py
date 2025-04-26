@@ -89,5 +89,10 @@ if __name__ == '__main__':
     for it in range(len(titles)):
         output.append({'game': titles[it], 'link': links[it], 'date': dates[it]})
     
-    save_to_json(output)
+    user_input: str = input('How many entries would you like to save? (type a number and hit enter, or just enter to save all files found)      ')
+    if user_input.isnumeric():
+        user_input = int(user_input)
+        save_to_json(output, user_input)
+    else:
+        save_to_json(output)
 
