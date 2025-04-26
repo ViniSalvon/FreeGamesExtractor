@@ -1,4 +1,5 @@
 from selenium.webdriver import Firefox
+from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.common.by import By
 
 from selenium.webdriver.support.ui import WebDriverWait
@@ -7,48 +8,32 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 
-from time import sleep
-
-import constants as ct
+from rich import print
+import constants as CT
 import json
+from tqdm import tqdm
 
 
-def scroll_to_the_bottom(driver: WebDriver):
-    at_bottom = driver.execute_script("return (window.innerHeight + window.scrollY) >= document.body.scrollHeight;")
+def zoom_out(driver: Firefox, zoom_out_qtd: int):
+    driver.set_context('chrome')
+    zoom_step = 0.1
+    current_zoom = float(driver.execute_script(
+        "return Services.prefs.getCharPref('layout.css.devPixelsPerPx');"
+    ))
+    new_zoom = max(0.3, current_zoom - (zoom_step * zoom_out_qtd))
 
-    while not at_bottom:
-        driver.execute_script("window.scrollBy(0, 100);")
-        sleep(0.1)
-        at_bottom = driver.execute_script("return (window.innerHeight + window.scrollY) >= document.body.scrollHeight;")
-    
-    sleep(0.3)
+    driver.execute_script(
+        f"Services.prefs.setCharPref('layout.css.devPixelsPerPx', '{new_zoom}');"
+    )
+
+    driver.set_context('content')
     return
 
 
-def extract_titles(entries: list[WebElement], titles: list[WebElement]) -> tuple[list[WebElement]]:
-    output_titles: list = []
-    output_links: list = []
-
-    for id, entry in enumerate(entries):
-        if '\npromoted' in entry.text:
-            continue
-        else:
-            output_titles.append(titles[id].text)
-            output_links.append(titles[id].get_attribute('href'))
-    
-    return (output_titles, output_links)
-
-
-def extract_dates(dates: list[WebElement]) -> list:
-    output_dates = []
-    for date in dates:
-        new_date = date.get_attribute('datetime').split('T')[0]
-        output_dates.append(new_date)
-    
-    return output_dates
-
-
 def save_to_json(content: list, first_n_entries: int = None):
+
+    if first_n_entries and not (isinstance(first_n_entries, int)):
+        raise ValueError("first_n_entries deve ser um inteiro")
     data_to_save = content[:first_n_entries] if first_n_entries else content
 
     with open('free_games.json', 'w', encoding='utf-8') as f:
@@ -56,43 +41,50 @@ def save_to_json(content: list, first_n_entries: int = None):
     return
 
 
-
 if __name__ == '__main__':
-    f: WebDriver = Firefox()
-    f.get(ct.URL_MAIN)
+    options = Options()
+    options.add_argument('--headless')  # Ativa o modo headless
 
+    f: WebDriver = Firefox(options=options)  # Passa as opções ao inicializar o WebDriver
+   
     wdw_wait_0 = WebDriverWait(
         driver=f,
-        timeout=ct.WDW_TIMEOUT_0,
-        poll_frequency=ct.WDW_PF_0,
+        timeout=CT.WDW_TIMEOUT_0,
+        poll_frequency=CT.WDW_PF_0,
         ignored_exceptions=None
     )
 
-    wdw_wait_0.until(EC.element_to_be_clickable((By.XPATH, ct.XP_DIV_ENTRIES)))
-    entries_divs: list[WebElement] = f.find_elements(By.XPATH, ct.XP_DIV_ENTRIES)
+    print('[bold green]Inicializando o sistema e navegando...[/bold green]')
+ 
+    f.get("about:newtab")
+    f.maximize_window()
+    zoom_out(f, 5)
+
+
+    f.get(CT.URL_MAIN)
     
-    wdw_wait_0.until(EC.element_to_be_clickable((By.XPATH, ct.XP_TITLES)))
-    all_titles: list[WebElement] = f.find_elements(By.XPATH, ct.XP_TITLES)
-
-    wdw_wait_0.until(EC.element_to_be_clickable((By.XPATH, ct.XP_ENTRY_TIME)))
-    scroll_to_the_bottom(f)
-    all_times: list[WebElement] = f.find_elements(By.XPATH, ct.XP_ENTRY_TIME)
-
-    titles, links = extract_titles(entries_divs, all_titles)
-    dates = extract_dates(all_times)
-
-    titles = titles[2:]
-    links = links[2:]
-    dates = dates[2:]
+    print("[bold green]Coletando dados...[/bold green]")
+    wdw_wait_0.until(EC.element_to_be_clickable((By.XPATH, CT.XP_ENTRIES)))
+    wdw_wait_0.until(EC.element_to_be_clickable((By.XPATH, CT.XP_ENTRY_TIME)))
     
+    entries_divs: list[WebElement] = f.find_elements(By.XPATH, CT.XP_ENTRIES)
+
     output = []
-    for it in range(len(titles)):
-        output.append({'game': titles[it], 'link': links[it], 'date': dates[it]})
+    num_entries = len(entries_divs) - 2
+    with tqdm(total=num_entries, desc="\033[1;32mProcessando dados...\033[0m", unit="entry", colour='green') as pbar:
+        for div in entries_divs[2:]:
+            title: str = div.find_element(By.XPATH, CT.XP_TITLES).text
+            link: str = div.find_element(By.XPATH, CT.XP_TITLES).get_attribute('href')
+            date: str = div.find_element(By.XPATH, CT.XP_ENTRY_TIME).get_attribute('datetime').split('T')[0]
+            output.append({'title': title, 'link': link, 'date': date})
+            pbar.update(1)
     
-    user_input: str = input('How many entries would you like to save? (type a number and hit enter, or just enter to save all files found)      ')
-    if user_input.isnumeric():
-        user_input = int(user_input)
-        save_to_json(output, user_input)
-    else:
-        save_to_json(output)
+    print("[bold green]Salvando dados em free_games.json...[/bold green]")
+    save_to_json(output, CT.SAVE_ENTRIES)
 
+    f.close()
+    print("[bold green]Dados salvos com sucesso![/bold green]")
+
+
+
+    
